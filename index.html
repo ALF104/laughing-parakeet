@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Inspector: uk.pmtiles</title>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        #hud {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            background: white; padding: 15px; width: 280px;
+            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-height: 90vh; display: flex; flex-direction: column;
+        }
+        #layers-list {
+            overflow-y: auto; margin-top: 10px; padding-right: 5px;
+            flex-grow: 1; border-top: 1px solid #eee;
+        }
+        .layer-item {
+            display: flex; align-items: center; margin-bottom: 8px; font-size: 14px;
+        }
+        .layer-item input[type="color"] {
+            border: none; width: 24px; height: 24px; cursor: pointer; margin-right: 10px; padding: 0; background: none;
+        }
+        .error { color: red; font-weight: bold; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+
+<div id="hud">
+    <h3>PMTiles Inspector</h3>
+    <div>File: <b>uk.pmtiles</b></div>
+    <div id="status" style="margin: 5px 0; font-size: 0.9em; color: #666;">Loading...</div>
+    <div id="layers-list"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.0.6/dist/pmtiles.js"></script>
+
+<script>
+    const status = document.getElementById('status');
+    const layerList = document.getElementById('layers-list');
+    const filename = "uk.pmtiles";
+
+    function log(msg, type) {
+        status.innerHTML = msg;
+        if(type) status.className = type;
+        console.log(msg);
+    }
+
+    function getRandomColor() {
+        // Generate a random HEX color
+        return "#" + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+    }
+
+    if (typeof pmtiles === 'undefined') {
+        log("CRITICAL: PMTiles library failed to load.", "error");
+    }
+
+    try {
+        const protocol = new pmtiles.Protocol();
+        maplibregl.addProtocol("pmtiles", protocol.tile);
+        
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: {
+                version: 8,
+                sources: {
+                    'osm': {
+                        type: 'raster',
+                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        tileSize: 256,
+                        attribution: '&copy; OpenStreetMap'
+                    },
+                    'my_source': {
+                        type: "vector",
+                        url: "pmtiles://" + window.location.href.replace('index.html','') + filename,
+                        attribution: filename
+                    }
+                },
+                layers: [
+                    { "id": "osm", "type": "raster", "source": "osm" }
+                ]
+            },
+            center: [0, 0],
+            zoom: 0
+        });
+
+        map.addControl(new maplibregl.NavigationControl());
+
+        const p_url = window.location.href.replace('index.html','') + filename;
+        const p = new pmtiles.PMTiles(p_url);
+
+        p.getHeader().then(header => {
+            if (header.minLon) {
+                 map.fitBounds([[header.minLon, header.minLat], [header.maxLon, header.maxLat]], {padding: 20});
+            }
+        });
+
+        p.getMetadata().then(metadata => {
+            let layers = [];
+            if (metadata.vector_layers) layers = metadata.vector_layers;
+            else if (metadata.json) {
+                try { layers = JSON.parse(metadata.json).vector_layers; } catch(e){}
+            }
+
+            if (!layers || layers.length === 0) {
+                 log("Loaded! (No layer names found)", "success");
+            } else {
+                 log(`Loaded! Found ${layers.length} layers`, "success");
+                 
+                 layers.forEach(l => {
+                    const id = l.id;
+                    const color = getRandomColor();
+                    
+                    // 1. Add Map Layers
+                    map.addLayer({
+                        id: id + "-fill", type: "fill", source: "my_source", "source-layer": id,
+                        paint: { "fill-color": color, "fill-opacity": 0.3, "fill-outline-color": color },
+                        filter: ["==", "$type", "Polygon"]
+                    });
+                    map.addLayer({
+                        id: id + "-line", type: "line", source: "my_source", "source-layer": id,
+                        paint: { "line-color": color, "line-width": 1 },
+                        filter: ["==", "$type", "LineString"]
+                    });
+                    map.addLayer({
+                        id: id + "-pt", type: "circle", source: "my_source", "source-layer": id,
+                        paint: { "circle-color": color, "circle-radius": 3 },
+                        filter: ["==", "$type", "Point"]
+                    });
+
+                    // 2. Add Controls to HUD
+                    const row = document.createElement('div');
+                    row.className = 'layer-item';
+                    
+                    const input = document.createElement('input');
+                    input.type = 'color';
+                    input.value = color;
+                    
+                    const label = document.createElement('span');
+                    label.textContent = id;
+
+                    // Event Listener: Change color on the fly
+                    input.addEventListener('input', (e) => {
+                        const newColor = e.target.value;
+                        // We try to update all 3 types (Fill, Line, Point) because we don't know 
+                        // strictly which geometry this layer uses without inspecting every feature.
+                        if(map.getLayer(id + "-fill")) {
+                            map.setPaintProperty(id + "-fill", 'fill-color', newColor);
+                            map.setPaintProperty(id + "-fill", 'fill-outline-color', newColor);
+                        }
+                        if(map.getLayer(id + "-line")) {
+                            map.setPaintProperty(id + "-line", 'line-color', newColor);
+                        }
+                        if(map.getLayer(id + "-pt")) {
+                            map.setPaintProperty(id + "-pt", 'circle-color', newColor);
+                        }
+                    });
+
+                    row.appendChild(input);
+                    row.appendChild(label);
+                    layerList.appendChild(row);
+                 });
+            }
+        }).catch(e => {
+            log("Error reading metadata: " + e.message, "error");
+        });
+
+    } catch(e) {
+        log("Error: " + e.message, "error");
+    }
+</script>
+</body>
+</html>
