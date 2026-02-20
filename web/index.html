@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forensic Mapper</title>
+    <script type="text/javascript" src="/eel.js"></script>
+    <link href="lib/maplibre-gl.css" rel="stylesheet" />
+    <style>
+        :root {
+            --primary: #3182ce;
+            --primary-dark: #2c5282;
+            --bg-dark: #1e293b;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --white: #0f172a;
+            --success: #38a169;
+            --danger: #e53e3e;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        body { margin: 0; padding: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; height: 100vh; width: 100vw; overflow: hidden; background: #0f172a; color: var(--text-main); }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; z-index: 0; }
+        
+        #menu-btn {
+            position: absolute; top: 20px; left: 20px; z-index: 30;
+            background: #1e293b; color: white; padding: 0; 
+            border-radius: 8px; border: 1px solid #334155; box-shadow: var(--shadow);
+            cursor: pointer; font-weight: 600; display: flex; align-items: center;
+            justify-content: center; transition: all 0.2s; font-size: 18px;
+            width: 44px; height: 44px;
+        }
+        #menu-btn:hover { background: #0f172a; }
+
+        #main-menu {
+            display: none; position: absolute; top: 75px; left: 20px;
+            width: 340px; background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px); border-radius: 12px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            border: 1px solid #334155;
+            z-index: 30; flex-direction: column; overflow: hidden;
+            max-height: 85vh; overflow-y: auto;
+        }
+        #main-menu.open { display: flex; }
+
+        .menu-item {
+            padding: 14px 18px; border-bottom: 1px solid #334155; cursor: pointer;
+            font-size: 14px; color: #f1f5f9; display: flex; align-items: center;
+            justify-content: space-between; transition: background 0.2s;
+            font-weight: 600;
+        }
+        .menu-item:hover { background: #1e293b; }
+        
+        .submenu { display: none; flex-direction: column; background: #111827; border-bottom: 1px solid #334155; }
+        .submenu.open { display: flex; }
+        .submenu-content { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+        .arrow-icon { font-size: 10px; color: var(--text-muted); transition: transform 0.2s; }
+        .menu-item.active .arrow-icon { transform: rotate(180deg); }
+
+        .u-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 38px; width: 100%; }
+        .u-label { font-size: 13px; color: var(--text-muted); font-weight: 500; flex: 1; }
+        .u-control { width: 110px; flex-shrink: 0; }
+
+        button { 
+            height: 34px; border-radius: 6px; border: 1px solid #334155; font-size: 13px; 
+            font-weight: 600; cursor: pointer; transition: all 0.2s;
+            background: #1e293b; color: #f1f5f9; width: 100%;
+        }
+        button:hover { background: #334155; }
+        button.primary { background: var(--primary); border: none; }
+        button.primary:hover { background: var(--primary-dark); }
+        button.success { background: var(--success); border: none; }
+        button.danger { background: var(--danger); border: none; }
+        button.danger:hover { background: #c53030; }
+
+        .tool-panel { 
+            display: none; position: absolute; background: #0f172a; 
+            border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); 
+            border: 1px solid #334155; flex-direction: column; overflow: hidden; z-index: 25; 
+        }
+        .tool-panel.visible { display: flex; }
+
+        #list-panel { top: 20px; right: 20px; bottom: 20px; width: 340px; }
+        #trace-panel { bottom: 20px; left: 20px; width: 400px; max-height: 200px; }
+
+        .panel-header { padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); flex-shrink: 0; }
+        .panel-body { padding: 0; overflow-y: auto; flex-grow: 1; }
+
+        #tabs-container { display: flex; gap: 0; padding: 0; background: #111827; border-bottom: 1px solid #334155; overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
+        #tabs-container::-webkit-scrollbar { display: none; }
+
+        #search-container { padding: 10px; background: #111827; border-bottom: 1px solid #334155; flex-shrink: 0; display: none; }
+        #list-search { width: 100%; background: #0f172a; border: 1px solid #334155; color: white; padding: 6px 10px; border-radius: 4px; font-size: 12px; box-sizing: border-box; }
+
+        .point-item { padding: 10px; border-bottom: 1px solid #1e293b; font-size: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid transparent; }
+        
+        #playback-bar {
+            display: none; position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 540px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px);
+            border-radius: 16px; border: 1px solid #334155; z-index: 40; padding: 20px; flex-direction: column; gap: 15px;
+        }
+        #playback-bar.visible { display: flex; }
+        .playback-slider { width: 100%; height: 6px; border-radius: 3px; background: #334155; appearance: none; -webkit-appearance: none; cursor: pointer; }
+        .playback-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: var(--primary); border-radius: 50%; border: 3px solid white; }
+
+        .filter-list { max-height: 120px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; background: #0f172a; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+        
+        .time-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+        .time-row { display: flex; gap: 4px; }
+        .time-row input { flex: 1; background: #1e293b; color: white; border: 1px solid #334155; border-radius: 4px; padding: 6px; font-size: 12px; font-family: inherit; }
+        
+        #timeline-container { display: none; flex-direction: column; gap: 12px; margin-top: 10px; padding: 12px; background: #0f172a; border-radius: 8px; border: 1px solid #334155; }
+        .scrubber-block { display: flex; flex-direction: column; gap: 4px; }
+        .scrubber-label { font-family: monospace; font-size: 10px; color: var(--primary); text-align: right; }
+        .timeline-scrubber { width: 100%; cursor: pointer; height: 6px; border-radius: 3px; background: #334155; appearance: none; -webkit-appearance: none; margin: 5px 0; }
+        .timeline-scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--primary); border-radius: 50%; border: 2px solid white; }
+
+        #processing-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(4px);
+            z-index: 1000; flex-direction: column; align-items: center; justify-content: center;
+            color: white; gap: 20px;
+        }
+        .spinner { width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.1); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .recording-active { background: var(--danger) !important; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+        /* --- GLOBAL SEARCH BAR --- */
+        #global-search {
+            position: absolute; top: 20px; left: 80px; z-index: 30;
+            width: 340px;
+        }
+        #global-search-input {
+            width: 100%; height: 44px; padding: 0 16px 0 40px; border-radius: 8px;
+            background: #1e293b url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%2394a3b8" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>') no-repeat 15px center;
+            color: white; border: 1px solid #334155;
+            box-shadow: var(--shadow); font-size: 14px; box-sizing: border-box;
+            transition: all 0.2s;
+        }
+        #global-search-input:focus { outline: none; border-color: var(--primary); background: #0f172a; }
+        #global-search-input::placeholder { color: #94a3b8; }
+        
+        #search-results-dropdown {
+            position: absolute; top: 52px; left: 0; width: 100%;
+            background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px);
+            border: 1px solid #334155; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-height: 350px; overflow-y: auto; display: none; flex-direction: column;
+        }
+        .search-result-item {
+            padding: 12px 16px; border-bottom: 1px solid #334155; cursor: pointer;
+            display: flex; flex-direction: column; gap: 4px; transition: background 0.1s;
+        }
+        .search-result-item:hover { background: rgba(51, 65, 85, 0.5); }
+        .search-result-item:last-child { border-bottom: none; }
+        .sr-name { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+        .sr-type { font-size: 10px; color: var(--primary); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+
+        /* --- IMPORT WIZARD MODAL --- */
+        #import-modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+            z-index: 100; align-items: center; justify-content: center;
+        }
+        #import-modal {
+            width: 500px; background: #0f172a; border: 1px solid #334155; border-radius: 12px;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+        .modal-body { padding: 20px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .import-row { 
+            display: grid; grid-template-columns: 2fr 40px 1fr 30px; gap: 10px; align-items: center; 
+            padding: 10px; background: #1e293b; border-radius: 6px; border: 1px solid #334155;
+        }
+        .import-row input[type="text"] { height: 32px; background: #0f172a; border: 1px solid #334155; color: white; padding: 0 8px; border-radius: 4px; }
+        .import-row input[type="color"] { height: 32px; width: 100%; padding: 0; border: none; background: none; cursor: pointer; }
+        .remove-row-btn { background: transparent; border: none; color: #ef4444; font-size: 16px; cursor: pointer; padding: 0; width: auto; height: auto; }
+        .remove-row-btn:hover { color: #f87171; background: transparent; }
+    </style>
+</head>
+<body>
+
+<div id="processing-overlay">
+    <div class="spinner"></div>
+    <div id="processing-text" style="font-weight: 600; letter-spacing: 0.5px;">Importing Forensic Data...</div>
+</div>
+
+<div id="global-search">
+    <input type="text" id="global-search-input" placeholder="Search offline map (e.g. LS1, High Street)..." autocomplete="off">
+    <div id="search-results-dropdown"></div>
+</div>
+
+<div id="import-modal-overlay">
+    <div id="import-modal">
+        <div class="panel-header">
+            <span>Batch Import Wizard</span>
+            <span class="close-icon" onclick="App.closeImportWizard()">×</span>
+        </div>
+        <div class="modal-body" id="import-rows-container"></div>
+        <div style="padding: 15px; border-top: 1px solid #334155; background: #1e293b; display: flex; gap: 10px;">
+            <button class="secondary" onclick="App.addImportRow()" style="flex: 1;">+ Add Subject</button>
+            <button class="success" onclick="App.processBatchImport()" style="flex: 1;">Import All</button>
+        </div>
+    </div>
+</div>
+
+<button id="menu-btn" onclick="UI.toggleMenu()"><span>☰</span></button>
+
+<div id="main-menu">
+    <div class="menu-item" onclick="UI.toggleSubMenu(this, 'import-sub')">
+        <span>📂 Import KML</span><span class="arrow-icon">▼</span>
+    </div>
+    <div id="import-sub" class="submenu">
+        <div class="submenu-content">
+            <button class="primary" onclick="App.openImportWizard()">Open Import Wizard</button>
+            <button class="danger" onclick="App.clearPoints()">Clear All Data</button>
+        </div>
+    </div>
+
+    <div class="menu-item" onclick="UI.toggleSubMenu(this, 'filter-sub')">
+        <span>🔍 Filters</span><span class="arrow-icon">▼</span>
+    </div>
+    <div id="filter-sub" class="submenu">
+        <div class="submenu-content">
+            <span class="u-label">Filter Subjects:</span>
+            <div id="personFilterContainer" class="filter-list"></div>
+            
+            <span class="u-label" style="margin-top: 10px;">Manual Date/Time:</span>
+            <div class="time-group">
+                <div style="font-size: 10px; color: var(--text-muted);">From:</div>
+                <div class="time-row">
+                    <input type="date" id="filterStartDate" oninput="App.applyManualFilters()">
+                    <input type="time" id="filterStartTime" oninput="App.applyManualFilters()">
+                </div>
+            </div>
+            <div class="time-group">
+                <div style="font-size: 10px; color: var(--text-muted);">To:</div>
+                <div class="time-row">
+                    <input type="date" id="filterEndDate" oninput="App.applyManualFilters()">
+                    <input type="time" id="filterEndTime" oninput="App.applyManualFilters()">
+                </div>
+            </div>
+
+            <span class="u-label" style="margin-top: 10px;">Investigation Window:</span>
+            <div id="timeline-container">
+                <div class="scrubber-block">
+                    <div style="display:flex; justify-content:space-between;"><span style="font-size: 9px; color: var(--text-muted);">WINDOW START</span><span id="timeline-label-start" class="scrubber-label">--</span></div>
+                    <input type="range" id="timeline-start-slider" class="timeline-scrubber" oninput="App.onTimelineScrub(this.value, 'start')">
+                </div>
+                <div class="scrubber-block">
+                    <div style="display:flex; justify-content:space-between;"><span style="font-size: 9px; color: var(--text-muted);">WINDOW END</span><span id="timeline-label-end" class="scrubber-label">--</span></div>
+                    <input type="range" id="timeline-end-slider" class="timeline-scrubber" oninput="App.onTimelineScrub(this.value, 'end')">
+                </div>
+            </div>
+
+            <button onclick="App.resetFilters()" style="margin-top: 10px;">Reset View Range</button>
+        </div>
+    </div>
+    
+    <div class="menu-item" onclick="UI.toggleSubMenu(this, 'tools-sub')">
+        <span>🛠️ Tools</span><span class="arrow-icon">▼</span>
+    </div>
+    <div id="tools-sub" class="submenu">
+        <div class="submenu-content">
+            <button class="primary" onclick="App.zoomToData()">Zoom to Fit Data</button>
+            <button onclick="App.enableRefMode()">Set Target Pin</button>
+            <button class="success" onclick="App.startPlaybackSetup()">▶ Start Playback</button>
+            <button id="record-btn" onclick="App.toggleRecording()">⏺ Record Video</button>
+            <button class="outline" onclick="App.takeScreenshot()">Capture Map Image</button>
+        </div>
+    </div>
+
+    <div class="menu-item" onclick="UI.toggleSubMenu(this, 'view-sub')">
+        <span>👁️ View Options</span><span class="arrow-icon">▼</span>
+    </div>
+    <div id="view-sub" class="submenu">
+        <div class="submenu-content">
+            <div class="u-row">
+                <span class="u-label">Map Theme</span>
+                <div class="u-control"><button id="theme-toggle-btn" onclick="App.toggleTheme()">Light Mode</button></div>
+            </div>
+            <div class="u-row">
+                <span class="u-label">Connectivity</span>
+                <div class="u-control"><button id="source-toggle-btn" onclick="App.toggleSource()">Go Online</button></div>
+            </div>
+            <hr style="border-color: #334155; margin: 4px 0;">
+            <div class="u-row">
+                <span class="u-label">Playback Lines</span>
+                <div class="u-control" style="text-align:right;"><input type="checkbox" id="showPlaybackLines" checked onchange="App.togglePlaybackLine(this.checked)"></div>
+            </div>
+            <div class="u-row">
+                <span class="u-label">Subject Navigator</span>
+                <div class="u-control" style="text-align:right;"><input type="checkbox" id="showListToggle" onchange="UI.togglePanel('list-panel', this.checked)"></div>
+            </div>
+            <div class="u-row">
+                <span class="u-label">System Log</span>
+                <div class="u-control" style="text-align:right;"><input type="checkbox" id="showTraceToggle" onchange="UI.togglePanel('trace-panel', this.checked)" checked></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="list-panel" class="tool-panel">
+    <div class="panel-header"><span>Subject Navigator</span><span onclick="UI.closePanel('list-panel', 'showListToggle')" style="cursor:pointer;">×</span></div>
+    <div id="tabs-container"></div>
+    <div id="search-container">
+        <input type="text" id="list-search" placeholder="Search points..." oninput="App.searchList(this.value)">
+    </div>
+    <div class="panel-body">
+        <ul id="point-list" style="list-style:none; padding:0; margin:0;"></ul>
+    </div>
+</div>
+
+<div id="trace-panel" class="tool-panel visible">
+    <div class="panel-header"><span>System Log</span><span onclick="UI.closePanel('trace-panel', 'showTraceToggle')" style="cursor:pointer;">×</span></div>
+    <div class="panel-body" id="trace-log" style="font-family:monospace; font-size:11px; color:var(--text-muted); padding: 12px;"><div>> System Initialized.</div></div>
+</div>
+
+<div id="playback-bar">
+    <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:14px; font-weight:700;">Playback Timeline</span><span onclick="App.stopPlayback()" style="cursor:pointer;">×</span></div>
+    <input type="range" id="playback-slider" class="playback-slider" min="0" max="100" value="0" oninput="App.scrubPlayback(this.value)">
+    <div style="display:flex; gap:12px; align-items:center;">
+        <button id="play-pause-btn" class="primary" onclick="App.togglePlayPause()" style="width:44px; border-radius:50%;">▶</button>
+        <button id="record-btn-bar" onclick="App.toggleRecording()" style="width:auto; padding:0 15px;">⏺ Record</button>
+        <div style="flex:1"></div>
+        <select id="playback-speed" style="background:#1e293b; color:white; border:1px solid #334155; border-radius:4px;" onchange="App.setPlaybackSpeed(this.value)">
+            <option value="1000">1x Speed</option>
+            <option value="500">2x Speed</option>
+            <option value="100">10x Speed</option>
+        </select>
+    </div>
+</div>
+
+<div id="ref-info" style="display:none; position:absolute; bottom:25px; right:25px; background:#1e293b; padding:12px 18px; border-radius:10px; box-shadow:var(--shadow); font-size:13px; z-index:10; border:1px solid #334155; color:white;">
+    <strong style="color:#ef4444">🎯 Target:</strong> <span id="ref-coords-display" style="font-family:monospace;"></span>
+    <button onclick="App.clearRefPoint()" style="margin-left:12px; width:auto; padding:0 10px; height:26px; font-size:10px;">Clear</button>
+</div>
+
+<div id="map"></div>
+<script src="lib/maplibre-gl.js"></script>
+<script src="lib/pmtiles.js"></script>
+<script src="map_logic.js"></script>
+<script>
+    // --- GLOBAL SEARCH LOGIC ---
+    let searchTimeout = null;
+    let activeSearchPopup = null;
+
+    document.getElementById('global-search-input').addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        const dropdown = document.getElementById('search-results-dropdown');
+        
+        if (!val) { 
+            dropdown.style.display = 'none'; 
+            return; 
+        }
+
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(async () => {
+            const results = await eel.search_location(val)();
+            dropdown.innerHTML = '';
+
+            if (results.error) {
+                dropdown.innerHTML = `<div style="padding:15px; font-size:12px; color:#ef4444; text-align:center;">${results.error}</div>`;
+                dropdown.style.display = 'flex';
+                return;
+            }
+
+            if (results.length === 0) {
+                dropdown.innerHTML = `<div style="padding:15px; font-size:12px; color:#94a3b8; text-align:center;">No offline matches found.</div>`;
+                dropdown.style.display = 'flex';
+                return;
+            }
+
+            results.forEach(r => {
+                const div = document.createElement('div');
+                div.className = 'search-result-item';
+                div.innerHTML = `<span class="sr-name">${r.name}</span><span class="sr-type">${r.type}</span>`;
+                div.onclick = () => {
+                    window.map.flyTo({ center: [r.lon, r.lat], zoom: 17 });
+                    
+                    if(activeSearchPopup) activeSearchPopup.remove();
+                    activeSearchPopup = new maplibregl.Popup({ offset: 10, closeButton: false })
+                        .setLngLat([r.lon, r.lat])
+                        .setHTML(`<div style="padding:5px 8px; font-family:sans-serif; text-align:center;">
+                                    <strong style="color:#0f172a; font-size:13px; display:block; margin-bottom:2px;">${r.name}</strong>
+                                    <span style="font-size:10px; color:#3182ce; text-transform:uppercase; font-weight:bold;">${r.type}</span>
+                                  </div>`)
+                        .addTo(window.map);
+                        
+                    dropdown.style.display = 'none';
+                    document.getElementById('global-search-input').value = r.name;
+                };
+                dropdown.appendChild(div);
+            });
+            dropdown.style.display = 'flex';
+        }, 300); // 300ms debounce prevents lag while typing
+    });
+
+    // Hide dropdown when clicking elsewhere
+    document.addEventListener('click', (e) => {
+        if (!document.getElementById('global-search').contains(e.target)) {
+            document.getElementById('search-results-dropdown').style.display = 'none';
+        }
+    });
+</script>
+</body>
+</html>
